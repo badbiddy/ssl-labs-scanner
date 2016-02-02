@@ -5,7 +5,7 @@ import csv
 import sys
 
 __author__ = 'K. Coddington'
-# TODO Threading to allow concurrent scans (~20)
+# TODO Multiprocessing to allow concurrent scans (~20)
 # TODO IP to hostname resolution
 
 
@@ -139,6 +139,8 @@ def csv_output(infile, outfile):
                     'CRIME', 'Heartbleed'])  # insert header row
         for line in a:
             p = ssllab_scan(line, *scan_settings)
+            print(type(p))
+            print()
             if not p:
                 print("   %s not written to CSV.\n" % line)
                 continue

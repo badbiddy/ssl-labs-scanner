@@ -3,10 +3,10 @@ import json
 import time
 import csv
 import sys
+from Queue import Queue
+from threading import Thread, Lock
 
 __author__ = 'K. Coddington'
-# TODO Threading to allow concurrent scans (~20)
-# TODO IP to hostname resolution
 
 
 def verify_api():
@@ -18,12 +18,9 @@ def verify_api():
         return False
 
 
-def ssllab_scan(url, *settings):
+def ssllab_scan(url):
     print("Scanning %s..." % url)
-    scan_url = 'https://api.ssllabs.com/api/v2/analyze?host=' + url
-    if settings:
-        for arg in settings:
-            scan_url += '&%s' % arg  # appends each scan setting to API URL
+    scan_url = 'https://api.ssllabs.com/api/v2/analyze?host=%s&all=on&ignoreMismatch=on&fromCache=on&maxAge=24' % url
     response = json.loads(get(scan_url).text)
     if response['status'] != 'READY' and response['status'] != 'ERROR':
         print("   Cached results not found. Running new scan. This could take up to 90 seconds to complete.")
@@ -32,7 +29,7 @@ def ssllab_scan(url, *settings):
         response = json.loads(get(scan_url).text)  # stated again to refresh response variable
     if response['status'] == 'READY' and response['endpoints'][0]['statusMessage'] != 'Ready':
         print("   %s" % response['endpoints'][0]['statusMessage'])
-        return 0
+        return response
     return response
 
 
@@ -129,30 +126,60 @@ def single_site_output(parsed_json_text):
     main()
 
 
-def csv_output(infile, outfile):
-    with open(infile, 'r') as inf, open(outfile, 'wb+') as outf:
-        a = map(str.strip, inf.readlines())  # puts file lines into tuple and strips \n from elements
-        b = csv.writer(outf, dialect='excel', lineterminator='\n')
-        scan_settings = ['all=on', 'ignoreMismatch=on', 'fromCache=on', 'maxAge=24']
-        b.writerow(['Site', 'IP Address', 'Qualys Grade', 'SSLv2', 'SSLv3', 'TLSv1.0', 'TLSv1.1', 'TLSv1.2',
-                    'TLS Fallback SCSV', 'Forward Secrecy', 'POODLE (SSLv3)', 'POODLE (TLS)', 'FREAK', 'Logjam',
-                    'CRIME', 'Heartbleed'])  # insert header row
-        for line in a:
-            p = ssllab_scan(line, *scan_settings)
-            if not p:
-                print("   %s not written to CSV.\n" % line)
-                continue
-            print("   Writing results to CSV...\n")
-            b.writerow([p['host'], p['endpoints'][0]['ipAddress'], get_qualys_grades(p), get_protocol('ssl2', p),
+def queue_worker(queue, outf):
+    while True:
+        item = queue.get()
+        print(item)
+        do_work(item, outf)
+        queue.task_done()
+
+
+def do_work(p, outf):
+    lock = Lock()
+    output = csv.writer(open(outf, 'wb+'), dialect='excel', lineterminator='\n')
+    if not p:
+        print("Site not reachable. Entry not written to CSV.\n")
+        return 0
+    with lock:
+        output.writerow([p['host'], p['endpoints'][0]['ipAddress'], get_qualys_grades(p), get_protocol('ssl2', p),
                         get_protocol('ssl3', p), get_protocol('tls10', p), get_protocol('tls11', p),
                         get_protocol('tls12', p), get_fallback(p), get_forward_secrecy(p), get_poodle_ssl(p),
                         get_poodle_tls(p), get_freak(p), get_logjam(p), get_crime(p), get_heartbleed(p)])
+
+
+def get_url_list(listfile):
+    url_list = []
+    with open(listfile, 'r') as inf:
+        a = map(str.strip, inf.readlines())
+        for line in a:
+            url_list.append(line)
+    return url_list
+
+
+def csv_output(urllist, outfile):
+    q = Queue(maxsize=0)
+    num_threads = 20  # maximum number of concurrent scans
+    l = get_url_list(urllist)  # parses list of URLs for scanning
+
+    with open(outfile, 'wb+') as outf:
+        b = csv.writer(outf, dialect='excel', lineterminator='\n')
+        b.writerow(['Site', 'IP Address', 'Qualys Grade', 'SSLv2', 'SSLv3', 'TLSv1.0', 'TLSv1.1', 'TLSv1.2',
+                    'TLS Fallback SCSV', 'Forward Secrecy', 'POODLE (SSLv3)', 'POODLE (TLS)', 'FREAK', 'Logjam',
+                    'CRIME', 'Heartbleed'])  # insert header row
+    for i in range(num_threads):  # start queue worker daemon
+        worker = Thread(target=queue_worker, args=(q, outfile))
+        worker.setDaemon(True)
+        worker.start()
+    for url in l:
+        q.put(ssllab_scan(url))
+    q.join()
 
 
 def main():
     if not verify_api():
         print("Qualys API site is currently down.  Please try again later.")
         raw_input("\n Press Enter to exit.")
+        sys.exit(0)
 
     print("\n-----------------------------------"
           "\n-  Qualys SSL Labs Scanning Tool  -"
@@ -164,30 +191,34 @@ def main():
           "\n")
     try:
         choice = int(raw_input(" Choose type of scan:  "))
+        if choice == 1:
+            scan_settings = ['all=on', 'ignoreMismatch=on', 'fromCache=on', 'maxAge=24']
+            url = raw_input("\nWhat is the URL you wish to scan?  ")
+            print("\n")
+            single_site_output(single_site_output(ssllab_scan(url, *scan_settings)))
+        elif choice == 2:
+            try:
+                url_list = raw_input("\nWhat is the path to the list of URLs?  ")
+                out_csv = raw_input("\nWhat will be the destination filename (must be .csv)?  ")
+                print("\n")
+                csv_output(url_list, out_csv)
+                raw_input("\nScan complete. Press Enter to return to menu.")
+                main()
+            except OSError:
+                print("ERROR: File path not found. Make sure the path exists and you are not using quotes.")
+                raw_input("\nPress Enter to return to menu.")
+                main()
+            except IOError:
+                print("ERROR: URL list file specified does not exist.")
+                raw_input("\nPress Enter to return to menu.")
+                main()
+        elif choice == 3:
+            sys.exit(0)
+        else:
+            print("That is not a valid selection")
+            main()
     except ValueError:
         print("\nPlease enter a valid menu option.\n")
-        main()
-    if choice == 1:
-        scan_settings = ['all=on', 'ignoreMismatch=on', 'fromCache=on', 'maxAge=24']
-        url = raw_input("\nWhat is the URL you wish to scan?  ")
-        print("\n")
-        single_site_output(single_site_output(ssllab_scan(url, *scan_settings)))
-    elif choice == 2:
-        try:
-            url_list = raw_input("\nWhat is the path to the list of URLs?  ")
-            out_csv = raw_input("\nWhat will be the destination filename (must be .csv)?  ")
-            print("\n")
-            csv_output(url_list, out_csv)
-            raw_input("\nScan complete. Press Enter to return to menu.")
-            main()
-        except OSError:
-            print("ERROR: File path not found. Make sure the path exists and you are not using quotes.")
-            raw_input("\nPress Enter to return to menu.")
-            main()
-    elif choice == 3:
-        sys.exit(0)
-    else:
-        print("That is not a valid selection")
         main()
 
 while True:
