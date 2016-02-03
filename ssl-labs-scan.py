@@ -227,7 +227,7 @@ def main():
         single_site_output(ssllab_scan(args.url))
         sys.exit(0)
 
-    if args.url_list and args.output_csv:
+    if args.listfile and args.output_csv:
         try:
             with open(args.output_csv, 'wb+'):
                 pass
