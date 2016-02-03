@@ -139,7 +139,7 @@ def scan_kickoff(url_list):
     for url in url_list:
         scan_url = 'https://api.ssllabs.com/api/v2/analyze?host=%s&all=on&ignoreMismatch=on&startNew=on' % url
         counter += 1
-        if counter % 25 == 0:
+        if counter % 20 == 0:
             print("Concurrent scan limit exceeded. Waiting for cooldown...")
             time.sleep(90)
         time.sleep(1)
@@ -152,8 +152,9 @@ def scan_kickoff(url_list):
 def get_cached_results(url_list):
     cached_list = []
     for url in url_list:
+        time.sleep(1)
         try:
-            results = 'https://api.ssllabs.com/api/v2/analyze?host=%s&all=done&fromCache=on' % url
+            results = 'https://api.ssllabs.com/api/v2/analyze?host=%s&all=done&fromCache=on&maxAge=24' % url
             response = json.loads(get(results).text)
             cached_list.append(response)
         except TypeError:
@@ -172,6 +173,10 @@ def csv_output(inlist, outfile):
                     'TLS Fallback SCSV', 'Forward Secrecy', 'POODLE (SSLv3)', 'POODLE (TLS)', 'FREAK', 'Logjam',
                     'CRIME', 'Heartbleed'])  # insert header row
         for p in l:
+            if p['status'] == 'READY' and p['endpoints'][0]['statusMessage'] != 'Ready':
+                print("   %s for %s" % (p['endpoints'][0]['statusMessage'], p['host']))
+                print("   %s not added to csv." % p['host'])
+                continue
             b.writerow([p['host'], p['endpoints'][0]['ipAddress'], get_qualys_grades(p), get_protocol('ssl2', p),
                         get_protocol('ssl3', p), get_protocol('tls10', p), get_protocol('tls11', p),
                         get_protocol('tls12', p), get_fallback(p), get_forward_secrecy(p), get_poodle_ssl(p),
@@ -195,10 +200,9 @@ def main():
     try:
         choice = int(raw_input(" Choose type of scan:  "))
         if choice == 1:
-            scan_settings = ['all=on', 'ignoreMismatch=on', 'fromCache=on', 'maxAge=24']
             url = raw_input("\nWhat is the URL you wish to scan?  ")
             print("\n")
-            single_site_output(single_site_output(ssllab_scan(url, *scan_settings)))
+            single_site_output(single_site_output(ssllab_scan(url)))
         elif choice == 2:
             try:
                 url_list = raw_input("\nWhat is the path to the list of URLs?  ")
