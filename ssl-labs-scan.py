@@ -155,28 +155,34 @@ def get_url_list(listfile):
 
 
 def scan_kickoff(url_list):
-    counter = 0
+    api_url = 'https://api.ssllabs.com/api/v2/'
+    info_url = api_url + 'info'
+    max_scan_count = json.loads(get(info_url).text)['maxAssessments']
     print("\n------------------------------------------------------------")
     for url in url_list:
-        scan_url = 'https://api.ssllabs.com/api/v2/analyze?host=%s&all=on&ignoreMismatch=on&startNew=on' % url
-        counter += 1
-        if counter % 20 == 0:
-            print(" Concurrent scan limit exceeded. Waiting for cooldown...")
-            time.sleep(90)
-        time.sleep(1)
+        if len(url) == 0:
+            continue
+        scan_url = api_url + 'analyze?host=%s&all=on&ignoreMismatch=on&&fromCache=on&maxAge=24' % url
+        while json.loads(get(info_url).text)['currentAssessments'] >= (max_scan_count - 5):
+            print(" *** Concurrent scan limit reached. Waiting for slots to open. ***")
+            time.sleep(15)
         print(" Kicking off scan for %s..." % url)
         head(scan_url)
-    time.sleep(90)
+        time.sleep(1)
+    while json.loads(get(info_url).text)['currentAssessments'] > 0:
+        time.sleep(5)
     print(" All scans complete.")
-    print("------------------------------------------------------------\n\n")
+    print("------------------------------------------------------------\n")
 
 
 def get_cached_results(url_list):
+    api_url = 'https://api.ssllabs.com/api/v2/'
     cached_list = []
     for url in url_list:
         time.sleep(1)
         try:
-            results = 'https://api.ssllabs.com/api/v2/analyze?host=%s&all=done&fromCache=on&maxAge=24' % url
+            print("Retrieving results for %s..." % url)
+            results = api_url + 'analyze?host=%s&all=on&ignoreMismatch=on&&fromCache=on&maxAge=24' % url
             response = json.loads(get(results).text)
             cached_list.append(response)
         except TypeError:
@@ -196,18 +202,21 @@ def csv_output(inlist, outfile):
                     'TLS Fallback SCSV', 'Forward Secrecy', 'POODLE (SSLv3)', 'POODLE (TLS)', 'FREAK', 'Logjam',
                     'CRIME', 'Heartbleed'])  # insert header row
         for p in l:
-            if p['status'] == 'READY' and p['endpoints'][0]['statusMessage'] != 'Ready':
-                print("   %s for %s" % (p['endpoints'][0]['statusMessage'], p['host']))
-                print("   %s not added to csv.\n" % p['host'])
-                continue
-            if p['status'] == 'ERROR':
-                print("   %s for %s" % (p['statusMessage'], p['host']))
-                print("   %s not added to csv.\n" % p['host'])
-                continue
-            b.writerow([p['host'], p['endpoints'][0]['ipAddress'], get_qualys_grades(p), get_protocol('ssl2', p),
-                        get_protocol('ssl3', p), get_protocol('tls10', p), get_protocol('tls11', p),
-                        get_protocol('tls12', p), get_fallback(p), get_forward_secrecy(p), get_poodle_ssl(p),
-                        get_poodle_tls(p), get_freak(p), get_logjam(p), get_crime(p), get_heartbleed(p)])
+            try:
+                if p['status'] == 'READY' and p['endpoints'][0]['statusMessage'] != 'Ready':
+                    print("   %s for %s" % (p['endpoints'][0]['statusMessage'], p['host']))
+                    print("   %s not added to csv.\n" % p['host'])
+                    continue
+                if p['status'] == 'ERROR':
+                    print("   %s for %s" % (p['statusMessage'], p['host']))
+                    print("   %s not added to csv.\n" % p['host'])
+                    continue
+                b.writerow([p['host'], p['endpoints'][0]['ipAddress'], get_qualys_grades(p), get_protocol('ssl2', p),
+                            get_protocol('ssl3', p), get_protocol('tls10', p), get_protocol('tls11', p),
+                            get_protocol('tls12', p), get_fallback(p), get_forward_secrecy(p), get_poodle_ssl(p),
+                            get_poodle_tls(p), get_freak(p), get_logjam(p), get_crime(p), get_heartbleed(p)])
+            except KeyError:
+                pass
     print(" Writing to %s complete." % outfile)
     print("------------------------------------------------------------\n\n")
 
