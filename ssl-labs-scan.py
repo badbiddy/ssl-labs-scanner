@@ -46,8 +46,11 @@ def ssllab_scan(url):
         time.sleep(4)
         response = json.loads(get(scan_url).text)  # stated again to refresh response variable
     if response['status'] == 'READY' and response['endpoints'][0]['statusMessage'] != 'Ready':
-        print("   %s" % response['endpoints'][0]['statusMessage'])
+        print("%s for %s" % (response['endpoints'][0]['statusMessage'], response['host']))
         return response
+    if response['status'] == 'ERROR':
+        print("%s for %s" % (response['statusMessage'], response['host']))
+        sys.exit(0)
     return response
 
 
@@ -195,6 +198,10 @@ def csv_output(inlist, outfile):
         for p in l:
             if p['status'] == 'READY' and p['endpoints'][0]['statusMessage'] != 'Ready':
                 print("   %s for %s" % (p['endpoints'][0]['statusMessage'], p['host']))
+                print("   %s not added to csv.\n" % p['host'])
+                continue
+            if p['status'] == 'ERROR':
+                print("   %s for %s" % (p['statusMessage'], p['host']))
                 print("   %s not added to csv.\n" % p['host'])
                 continue
             b.writerow([p['host'], p['endpoints'][0]['ipAddress'], get_qualys_grades(p), get_protocol('ssl2', p),
