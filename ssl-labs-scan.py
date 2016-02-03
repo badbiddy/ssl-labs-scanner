@@ -207,6 +207,10 @@ def csv_output(inlist, outfile):
 
 def main():
     args = setargs()
+    if not verify_api():
+        print("SSL Labs API is not reachable at this time. Exiting.")
+        sys.exit(0)
+
     if args.url:
         single_site_output(ssllab_scan(args.url))
         sys.exit(0)
