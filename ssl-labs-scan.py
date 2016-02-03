@@ -1,4 +1,4 @@
-from requests import get, head
+from requests import get
 import json
 import time
 import csv
@@ -122,7 +122,7 @@ def single_site_output(url):
         sys.exit(0)
     if p['status'] == 'ERROR':
         print("%s for %s" % (p['statusMessage'], p['host']))
-    sys.exit(0)
+        sys.exit(0)
     print("\n--------------------------------------------------------------")
     print("  Results for " + p['host'] + ":\n")
     print("  IP Address: %s" % p['endpoints'][0]['ipAddress'])
