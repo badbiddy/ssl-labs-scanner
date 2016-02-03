@@ -19,7 +19,7 @@ def setargs():
                         dest='url',
                         help='Scan a single URL')
     parser.add_argument('-ms', '--multi-site',
-                        dest='url_list',
+                        dest='listfile',
                         help='Scan multiple URLs from newline-delimited text file')
     parser.add_argument('-o', '--output',
                         dest='output_csv',
@@ -184,9 +184,8 @@ def get_cached_results(url_list):
 
 
 def csv_output(inlist, outfile):
-    url_list = get_url_list(inlist)  # parses list of URLs for scanning
-    scan_kickoff(url_list)
-    l = get_cached_results(url_list)
+    l = get_cached_results(inlist)
+    bad_list = []
     print("------------------------------------------------------------")
     print(" Writing results to %s...\n" % outfile)
     with open(outfile, 'wb+') as outf:
@@ -195,21 +194,25 @@ def csv_output(inlist, outfile):
                     'TLS Fallback SCSV', 'Forward Secrecy', 'POODLE (SSLv3)', 'POODLE (TLS)', 'FREAK', 'Logjam',
                     'CRIME', 'Heartbleed'])  # insert header row
         for p in l:
-            try:
-                if p['status'] == 'READY' and p['endpoints'][0]['statusMessage'] != 'Ready':
-                    print("   %s for %s" % (p['endpoints'][0]['statusMessage'], p['host']))
-                    print("   %s not added to csv.\n" % p['host'])
+            if p['status'] == 'READY' and p['endpoints'][0]['statusMessage'] != 'Ready':
+                bad_list.append(p)
+                continue
+            if p['status'] == 'ERROR':
+                bad_list.append(p)
+                continue
+            b.writerow([p['host'], p['endpoints'][0]['ipAddress'], get_qualys_grades(p), get_protocol('ssl2', p),
+                        get_protocol('ssl3', p), get_protocol('tls10', p), get_protocol('tls11', p),
+                        get_protocol('tls12', p), get_fallback(p), get_forward_secrecy(p), get_poodle_ssl(p),
+                        get_poodle_tls(p), get_freak(p), get_logjam(p), get_crime(p), get_heartbleed(p)])
+        if bad_list:
+            b.writerow([''])
+            b.writerow(['Bad URLs:'])
+            for bad_url in bad_list:
+                if bad_url['status'] == 'READY':
+                    b.writerow([bad_url['host'], bad_url['endpoints'][0]['statusMessage']])
                     continue
-                if p['status'] == 'ERROR':
-                    print("   %s for %s" % (p['statusMessage'], p['host']))
-                    print("   %s not added to csv.\n" % p['host'])
-                    continue
-                b.writerow([p['host'], p['endpoints'][0]['ipAddress'], get_qualys_grades(p), get_protocol('ssl2', p),
-                            get_protocol('ssl3', p), get_protocol('tls10', p), get_protocol('tls11', p),
-                            get_protocol('tls12', p), get_fallback(p), get_forward_secrecy(p), get_poodle_ssl(p),
-                            get_poodle_tls(p), get_freak(p), get_logjam(p), get_crime(p), get_heartbleed(p)])
-            except KeyError:
-                pass
+                if bad_url['status'] == 'ERROR':
+                    b.writerow([bad_url['host'], bad_url['statusMessage']])
     print(" Writing to %s complete." % outfile)
     print("------------------------------------------------------------\n\n")
 
@@ -225,7 +228,15 @@ def main():
         sys.exit(0)
 
     if args.url_list and args.output_csv:
-        csv_output(args.url_list, args.output_csv)
+        try:
+            with open(args.output_csv, 'wb+'):
+                pass
+        except IOError:
+            print("\n  Output file is currently in use. Please close the file and try again.")
+            sys.exit(0)
+        url_list = get_url_list(args.listfile)
+        scan_kickoff(url_list)
+        csv_output(url_list, args.output_csv)
         sys.exit(0)
 
     if args.url_list and not args.output_csv:
