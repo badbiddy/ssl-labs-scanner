@@ -1,12 +1,11 @@
-from requests import get
+from requests import get, head
 import json
 import time
 import csv
 import sys
-from Queue import Queue
-from threading import Thread, Lock
 
 __author__ = 'K. Coddington'
+# https://github.com/ssllabs/ssllabs-scan/blob/stable/ssllabs-api-docs.md
 
 
 def verify_api():
@@ -126,27 +125,6 @@ def single_site_output(parsed_json_text):
     main()
 
 
-def queue_worker(queue, outf):
-    while True:
-        item = queue.get()
-        print(item)
-        do_work(item, outf)
-        queue.task_done()
-
-
-def do_work(p, outf):
-    lock = Lock()
-    output = csv.writer(open(outf, 'wb+'), dialect='excel', lineterminator='\n')
-    if not p:
-        print("Site not reachable. Entry not written to CSV.\n")
-        return 0
-    with lock:
-        output.writerow([p['host'], p['endpoints'][0]['ipAddress'], get_qualys_grades(p), get_protocol('ssl2', p),
-                        get_protocol('ssl3', p), get_protocol('tls10', p), get_protocol('tls11', p),
-                        get_protocol('tls12', p), get_fallback(p), get_forward_secrecy(p), get_poodle_ssl(p),
-                        get_poodle_tls(p), get_freak(p), get_logjam(p), get_crime(p), get_heartbleed(p)])
-
-
 def get_url_list(listfile):
     url_list = []
     with open(listfile, 'r') as inf:
@@ -156,23 +134,48 @@ def get_url_list(listfile):
     return url_list
 
 
-def csv_output(urllist, outfile):
-    q = Queue(maxsize=0)
-    num_threads = 20  # maximum number of concurrent scans
-    l = get_url_list(urllist)  # parses list of URLs for scanning
+def scan_kickoff(url_list):
+    counter = 0
+    for url in url_list:
+        scan_url = 'https://api.ssllabs.com/api/v2/analyze?host=%s&all=on&ignoreMismatch=on&startNew=on' % url
+        counter += 1
+        if counter % 25 == 0:
+            print("Concurrent scan limit exceeded. Waiting for cooldown...")
+            time.sleep(90)
+        time.sleep(1)
+        print("Kicking off scan for %s..." % url)
+        head(scan_url)
+    time.sleep(90)
+    print("All scans complete.")
 
+
+def get_cached_results(url_list):
+    cached_list = []
+    for url in url_list:
+        try:
+            results = 'https://api.ssllabs.com/api/v2/analyze?host=%s&all=done&fromCache=on' % url
+            response = json.loads(get(results).text)
+            cached_list.append(response)
+        except TypeError:
+            print("%s could not be successfully scanned and will not be included in output file.")
+    return cached_list
+
+
+def csv_output(inlist, outfile):
+    url_list = get_url_list(inlist)  # parses list of URLs for scanning
+    scan_kickoff(url_list)
+    l = get_cached_results(url_list)
+    print("Writing results to csv...")
     with open(outfile, 'wb+') as outf:
         b = csv.writer(outf, dialect='excel', lineterminator='\n')
         b.writerow(['Site', 'IP Address', 'Qualys Grade', 'SSLv2', 'SSLv3', 'TLSv1.0', 'TLSv1.1', 'TLSv1.2',
                     'TLS Fallback SCSV', 'Forward Secrecy', 'POODLE (SSLv3)', 'POODLE (TLS)', 'FREAK', 'Logjam',
                     'CRIME', 'Heartbleed'])  # insert header row
-    for i in range(num_threads):  # start queue worker daemon
-        worker = Thread(target=queue_worker, args=(q, outfile))
-        worker.setDaemon(True)
-        worker.start()
-    for url in l:
-        q.put(ssllab_scan(url))
-    q.join()
+        for p in l:
+            b.writerow([p['host'], p['endpoints'][0]['ipAddress'], get_qualys_grades(p), get_protocol('ssl2', p),
+                        get_protocol('ssl3', p), get_protocol('tls10', p), get_protocol('tls11', p),
+                        get_protocol('tls12', p), get_fallback(p), get_forward_secrecy(p), get_poodle_ssl(p),
+                        get_poodle_tls(p), get_freak(p), get_logjam(p), get_crime(p), get_heartbleed(p)])
 
 
 def main():
