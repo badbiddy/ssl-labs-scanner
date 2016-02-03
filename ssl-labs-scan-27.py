@@ -11,10 +11,7 @@ __author__ = 'K. Coddington'
 def verify_api():
     api_info_url = 'https://api.ssllabs.com/api/v2/info'
     response = json.loads(get(api_info_url).text)
-    if response['engineVersion']:
-        return True
-    else:
-        return False
+    return response['engineVersion']
 
 
 def ssllab_scan(url):
