@@ -166,7 +166,7 @@ def scan_kickoff(url_list):
         time.sleep(1)
     while ssllab_info()['currentAssessments'] > 0:
         time.sleep(5)
-    print(" All scans complete.")
+    print("\n All scans complete.")
     print("------------------------------------------------------------\n")
 
 
