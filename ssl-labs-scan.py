@@ -30,27 +30,15 @@ def setargs():
     return parser.parse_args()
 
 
-def verify_api():
+def ssllab_info():
     api_info_url = 'https://api.ssllabs.com/api/v2/info'
     response = json.loads(get(api_info_url).text)
-    return response['engineVersion']
+    return response
 
 
 def ssllab_scan(url):
-    print("\nScanning %s..." % url)
     scan_url = 'https://api.ssllabs.com/api/v2/analyze?host=%s&all=on&ignoreMismatch=on&fromCache=on&maxAge=24' % url
     response = json.loads(get(scan_url).text)
-    if response['status'] != 'READY' and response['status'] != 'ERROR':
-        print("   Cached results not found. Running new scan. This could take up to 90 seconds to complete.")
-    while response['status'] != 'READY' and response['status'] != 'ERROR':
-        time.sleep(4)
-        response = json.loads(get(scan_url).text)  # stated again to refresh response variable
-    if response['status'] == 'READY' and response['endpoints'][0]['statusMessage'] != 'Ready':
-        print("%s for %s" % (response['endpoints'][0]['statusMessage'], response['host']))
-        return response
-    if response['status'] == 'ERROR':
-        print("%s for %s" % (response['statusMessage'], response['host']))
-        sys.exit(0)
     return response
 
 
@@ -121,10 +109,20 @@ def get_heartbleed(parsed_json_text):
     return parsed_json_text['endpoints'][0]['details']['heartbleed']
 
 
-def single_site_output(parsed_json_text):
-    if not parsed_json_text:
-        main()
-    p = parsed_json_text
+def single_site_output(url):
+    print("\nScanning %s..." % url)
+    p = ssllab_scan(url)
+    if p['status'] != 'READY' and p['status'] != 'ERROR':
+        print("   Cached results not found. Running new scan. This could take up to 90 seconds to complete.")
+    while p['status'] != 'READY' and p['status'] != 'ERROR':
+        time.sleep(4)
+        p = ssllab_scan(url)  # stated again to refresh response variable
+    if p['status'] == 'READY' and p['endpoints'][0]['statusMessage'] != 'Ready':
+        print("%s for %s" % (p['endpoints'][0]['statusMessage'], p['host']))
+        sys.exit(0)
+    if p['status'] == 'ERROR':
+        print("%s for %s" % (p['statusMessage'], p['host']))
+    sys.exit(0)
     print("\n--------------------------------------------------------------")
     print("  Results for " + p['host'] + ":\n")
     print("  IP Address: %s" % p['endpoints'][0]['ipAddress'])
@@ -155,35 +153,30 @@ def get_url_list(listfile):
 
 
 def scan_kickoff(url_list):
-    api_url = 'https://api.ssllabs.com/api/v2/'
-    info_url = api_url + 'info'
-    max_scan_count = json.loads(get(info_url).text)['maxAssessments']
+    max_scan_count = ssllab_info()['maxAssessments']
     print("\n------------------------------------------------------------")
     for url in url_list:
         if len(url) == 0:
             continue
-        scan_url = api_url + 'analyze?host=%s&all=on&ignoreMismatch=on&&fromCache=on&maxAge=24' % url
-        while json.loads(get(info_url).text)['currentAssessments'] >= (max_scan_count - 5):
+        while ssllab_info()['currentAssessments'] >= (max_scan_count - 5):
             print(" *** Concurrent scan limit reached. Waiting for slots to open. ***")
             time.sleep(15)
         print(" Kicking off scan for %s..." % url)
-        head(scan_url)
+        ssllab_scan(url)
         time.sleep(1)
-    while json.loads(get(info_url).text)['currentAssessments'] > 0:
+    while ssllab_info()['currentAssessments'] > 0:
         time.sleep(5)
     print(" All scans complete.")
     print("------------------------------------------------------------\n")
 
 
 def get_cached_results(url_list):
-    api_url = 'https://api.ssllabs.com/api/v2/'
     cached_list = []
     for url in url_list:
         time.sleep(1)
         try:
             print("Retrieving results for %s..." % url)
-            results = api_url + 'analyze?host=%s&all=on&ignoreMismatch=on&&fromCache=on&maxAge=24' % url
-            response = json.loads(get(results).text)
+            response = ssllab_scan(url)
             cached_list.append(response)
         except TypeError:
             print("%s could not be successfully scanned and will not be included in output file.")
@@ -223,7 +216,7 @@ def csv_output(inlist, outfile):
 
 def main():
     args = setargs()
-    if not verify_api():
+    if not ssllab_info()['engineVersion']:
         print("SSL Labs API is not reachable at this time. Exiting.")
         sys.exit(0)
 
