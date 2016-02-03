@@ -3,9 +3,31 @@ import json
 import time
 import csv
 import sys
+import argparse
 
 __author__ = 'K. Coddington'
 # https://github.com/ssllabs/ssllabs-scan/blob/stable/ssllabs-api-docs.md
+
+
+def setargs():
+    description = 'This script will scan one or several URLs using the Qualys SSL Labs Scan API. Single scan results ' \
+                  'will be displayed in stdout, while scanning from a list will output to a CSV.'
+    usage = "\n\nssl-labs-scan.py [-ss URL] [-ms URL_LIST -o OUTPUT_CSV]"
+    parser = argparse.ArgumentParser(description=description, usage=usage)
+
+    parser.add_argument('-ss', '--single-site',
+                        dest='url',
+                        help='Scan a single URL')
+    parser.add_argument('-ms', '--multi-site',
+                        dest='url_list',
+                        help='Scan multiple URLs from newline-delimited text file')
+    parser.add_argument('-o', '--output',
+                        dest='output_csv',
+                        default='output.csv',
+                        help='<<Requires -ms option to be set>> Sets file that will receive output results. '
+                             'Default = output.csv')
+
+    return parser.parse_args()
 
 
 def verify_api():
@@ -15,7 +37,7 @@ def verify_api():
 
 
 def ssllab_scan(url):
-    print("Scanning %s..." % url)
+    print("\nScanning %s..." % url)
     scan_url = 'https://api.ssllabs.com/api/v2/analyze?host=%s&all=on&ignoreMismatch=on&fromCache=on&maxAge=24' % url
     response = json.loads(get(scan_url).text)
     if response['status'] != 'READY' and response['status'] != 'ERROR':
@@ -100,7 +122,7 @@ def single_site_output(parsed_json_text):
     if not parsed_json_text:
         main()
     p = parsed_json_text
-    print("\n-------------------------------------------------------")
+    print("\n--------------------------------------------------------------")
     print("  Results for " + p['host'] + ":\n")
     print("  IP Address: %s" % p['endpoints'][0]['ipAddress'])
     print("  Grade: %s\n" % get_qualys_grades(p))
@@ -109,17 +131,15 @@ def single_site_output(parsed_json_text):
     print("  TLSv1.0: %s" % get_protocol('tls10', p))
     print("  TLSv1.1: %s" % get_protocol('tls11', p))
     print("  TLSv1.2: %s\n" % get_protocol('tls12', p))
-    print("  TLS Fallback SCSV implemented: %s" % get_fallback(p))
-    print("  Uses Forward Secrecy: %s" % get_forward_secrecy(p))
+    print("  TLS Fallback SCSV implemented:       %s" % get_fallback(p))
+    print("  Uses Forward Secrecy:                %s" % get_forward_secrecy(p))
     print("  Vulnerable to POODLE (SSLv3) attack: %s" % get_poodle_ssl(p))
-    print("  Vulnerable to POODLE (TLS) attack: %s" % get_poodle_tls(p))
-    print("  Vulnerable to FREAK attack: %s" % get_freak(p))
-    print("  Vulnerable to Logjam attack: %s" % get_logjam(p))
-    print("  Vulnerable to CRIME attack: %s" % get_crime(p))
-    print("  Vulnerable to Heartbleed attack: %s" % get_heartbleed(p))
-    print("-------------------------------------------------------\n")
-    raw_input("Press Enter to return to menu...")
-    main()
+    print("  Vulnerable to POODLE (TLS) attack:   %s" % get_poodle_tls(p))
+    print("  Vulnerable to FREAK attack:          %s" % get_freak(p))
+    print("  Vulnerable to Logjam attack:         %s" % get_logjam(p))
+    print("  Vulnerable to CRIME attack:          %s" % get_crime(p))
+    print("  Vulnerable to Heartbleed attack:     %s" % get_heartbleed(p))
+    print("--------------------------------------------------------------\n")
 
 
 def get_url_list(listfile):
@@ -133,17 +153,19 @@ def get_url_list(listfile):
 
 def scan_kickoff(url_list):
     counter = 0
+    print("\n------------------------------------------------------------")
     for url in url_list:
         scan_url = 'https://api.ssllabs.com/api/v2/analyze?host=%s&all=on&ignoreMismatch=on&startNew=on' % url
         counter += 1
         if counter % 20 == 0:
-            print("Concurrent scan limit exceeded. Waiting for cooldown...")
+            print(" Concurrent scan limit exceeded. Waiting for cooldown...")
             time.sleep(90)
         time.sleep(1)
-        print("Kicking off scan for %s..." % url)
+        print(" Kicking off scan for %s..." % url)
         head(scan_url)
     time.sleep(90)
-    print("All scans complete.")
+    print(" All scans complete.")
+    print("------------------------------------------------------------\n\n")
 
 
 def get_cached_results(url_list):
@@ -163,7 +185,8 @@ def csv_output(inlist, outfile):
     url_list = get_url_list(inlist)  # parses list of URLs for scanning
     scan_kickoff(url_list)
     l = get_cached_results(url_list)
-    print("Writing results to csv...")
+    print("------------------------------------------------------------")
+    print(" Writing results to %s...\n" % outfile)
     with open(outfile, 'wb+') as outf:
         b = csv.writer(outf, dialect='excel', lineterminator='\n')
         b.writerow(['Site', 'IP Address', 'Qualys Grade', 'SSLv2', 'SSLv3', 'TLSv1.0', 'TLSv1.1', 'TLSv1.2',
@@ -172,58 +195,29 @@ def csv_output(inlist, outfile):
         for p in l:
             if p['status'] == 'READY' and p['endpoints'][0]['statusMessage'] != 'Ready':
                 print("   %s for %s" % (p['endpoints'][0]['statusMessage'], p['host']))
-                print("   %s not added to csv." % p['host'])
+                print("   %s not added to csv.\n" % p['host'])
                 continue
             b.writerow([p['host'], p['endpoints'][0]['ipAddress'], get_qualys_grades(p), get_protocol('ssl2', p),
                         get_protocol('ssl3', p), get_protocol('tls10', p), get_protocol('tls11', p),
                         get_protocol('tls12', p), get_fallback(p), get_forward_secrecy(p), get_poodle_ssl(p),
                         get_poodle_tls(p), get_freak(p), get_logjam(p), get_crime(p), get_heartbleed(p)])
+    print(" Writing to %s complete." % outfile)
+    print("------------------------------------------------------------\n\n")
 
 
 def main():
-    if not verify_api():
-        print("Qualys API site is currently down.  Please try again later.")
-        raw_input("\n Press Enter to exit.")
+    args = setargs()
+    if args.url:
+        single_site_output(ssllab_scan(args.url))
         sys.exit(0)
 
-    print("\n-----------------------------------"
-          "\n-  Qualys SSL Labs Scanning Tool  -"
-          "\n-----------------------------------"
-          "\n"
-          "\n (1) Single-site scan"
-          "\n (2) Multi-site scan from list"
-          "\n (3) Exit"
-          "\n")
-    try:
-        choice = int(raw_input(" Choose type of scan:  "))
-        if choice == 1:
-            url = raw_input("\nWhat is the URL you wish to scan?  ")
-            print("\n")
-            single_site_output(single_site_output(ssllab_scan(url)))
-        elif choice == 2:
-            try:
-                url_list = raw_input("\nWhat is the path to the list of URLs?  ")
-                out_csv = raw_input("\nWhat will be the destination filename (must be .csv)?  ")
-                print("\n")
-                csv_output(url_list, out_csv)
-                raw_input("\nScan complete. Press Enter to return to menu.")
-                main()
-            except OSError:
-                print("ERROR: File path not found. Make sure the path exists and you are not using quotes.")
-                raw_input("\nPress Enter to return to menu.")
-                main()
-            except IOError:
-                print("ERROR: URL list file specified does not exist.")
-                raw_input("\nPress Enter to return to menu.")
-                main()
-        elif choice == 3:
-            sys.exit(0)
-        else:
-            print("That is not a valid selection")
-            main()
-    except ValueError:
-        print("\nPlease enter a valid menu option.\n")
-        main()
+    if args.url_list and args.output_csv:
+        csv_output(args.url_list, args.output_csv)
+        sys.exit(0)
 
-while True:
+    if args.url_list and not args.output_csv:
+        print("Output file not set. Please use -h for more information.")
+        sys.exit(0)
+
+if __name__ == '__main__':
     main()
