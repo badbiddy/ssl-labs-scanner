@@ -37,7 +37,7 @@ def ssllab_info():
 
 
 def ssllab_scan(url):
-    scan_url = 'https://api.ssllabs.com/api/v2/analyze?host=%s&all=on&ignoreMismatch=on&fromCache=on&maxAge=24' % url
+    scan_url = 'https://api.ssllabs.com/api/v2/analyze?host=%s&all=on&ignoreMismatch=on&fromCache=on' % url
     response = json.loads(get(scan_url).text)
     return response
 
@@ -60,7 +60,10 @@ def get_qualys_grades(parsed_json_text):
 
 
 def get_fallback(parsed_json_text):
-    return parsed_json_text['endpoints'][0]['details']['fallbackScsv']
+    try:
+        return parsed_json_text['endpoints'][0]['details']['fallbackScsv']
+    except KeyError:
+        return 'n/a'
 
 
 def get_forward_secrecy(parsed_json_text):
@@ -153,12 +156,12 @@ def get_url_list(listfile):
 
 
 def scan_kickoff(url_list):
-    max_scan_count = ssllab_info()['maxAssessments']
+    # max_scan_count = ssllab_info()['maxAssessments']
     print("\n------------------------------------------------------------")
     for url in url_list:
         if len(url) == 0:
             continue
-        while ssllab_info()['currentAssessments'] >= (max_scan_count - 5):
+        while ssllab_info()['currentAssessments'] >= 5:
             print(" *** Concurrent scan limit reached. Waiting for slots to open. ***")
             time.sleep(15)
         print(" Kicking off scan for %s..." % url)
